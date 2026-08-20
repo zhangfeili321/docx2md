@@ -1167,7 +1167,7 @@ class DocxToMarkdownConverter:
         
         # 检测手动编号列表（如"1）xxx"、"2、xxx"、"（3）xxx"）
         if self._is_manual_numbered_list(text):
-            return ("list", f"- {text}")
+            return ("list", text)
         
         # 检测目录条目（如"1概述"、"1.1项目综述"、"2.1.3物探方法试验"）
         if self._is_toc_entry(text):
