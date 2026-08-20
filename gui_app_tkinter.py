@@ -42,7 +42,7 @@ class ConversionThread(threading.Thread):
                 remove_page_numbers=self.config.get('remove_page_numbers', True),
                 merge_paragraphs=self.config.get('merge_paragraphs', False),
                 image_enabled=self.config.get('image_enabled', True),
-                image_to_base64=self.config.get('image_to_base64', True),
+                image_to_base64=self.config.get('image_to_base64', False),
             )
             
             self.callback('progress', 20)
@@ -85,7 +85,7 @@ class BatchConversionThread(threading.Thread):
                 remove_page_numbers=self.config.get('remove_page_numbers', True),
                 merge_paragraphs=self.config.get('merge_paragraphs', False),
                 image_enabled=self.config.get('image_enabled', True),
-                image_to_base64=self.config.get('image_to_base64', True),
+                image_to_base64=self.config.get('image_to_base64', False),
             )
             
             total = len(self.file_list)
@@ -226,7 +226,7 @@ class DocxToMarkdownGUI:
         self.merge_paragraphs_var = tk.BooleanVar(value=False)
         self.enable_subheading_var = tk.BooleanVar(value=True)
         self.enable_image_var = tk.BooleanVar(value=True)
-        self.image_base64_var = tk.BooleanVar(value=True)
+        self.image_base64_var = tk.BooleanVar(value=False)
         self.batch_mode_var = tk.BooleanVar(value=False)
         
         def small_checkbox(parent, text, var):

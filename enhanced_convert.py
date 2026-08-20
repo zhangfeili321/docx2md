@@ -40,7 +40,7 @@ class ProcessingConfig:
     merge_paragraphs: bool = False      # 合并段落（保守策略）
     keep_headers_footers: bool = False # 保留页眉页脚
     image_enabled: bool = True          # 启用图片提取
-    image_to_base64: bool = True        # 图片内嵌Base64（False=导出到文件）
+    image_to_base64: bool = False       # 图片内嵌Base64（False=导出到文件）
     
     # 标题样式关键词（用于检测非标准标题样式）
     heading_style_keywords: List[str] = field(default_factory=lambda: [
