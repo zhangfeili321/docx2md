@@ -39,7 +39,8 @@ class ProcessingConfig:
     remove_page_numbers: bool = True    # 移除页码
     merge_paragraphs: bool = False      # 合并段落（保守策略）
     keep_headers_footers: bool = False # 保留页眉页脚
-    image_to_base64: bool = False      # 将图片转为Base64嵌入Markdown
+    image_enabled: bool = True          # 启用图片提取
+    image_to_base64: bool = True        # 图片内嵌Base64（False=导出到文件）
     
     # 标题样式关键词（用于检测非标准标题样式）
     heading_style_keywords: List[str] = field(default_factory=lambda: [
@@ -825,7 +826,10 @@ class ImageExtractor:
         """
         self.doc_path = doc_path
         self.doc_dir = os.path.dirname(doc_path)
-        self._image_cache: Dict[str, str] = {}  # relId -> base64 data
+        self._image_cache: Dict[str, str] = {}  # relId -> base64 data URI
+        self._raw_cache: Dict[str, bytes] = {}   # relId -> raw image bytes
+        self._ext_cache: Dict[str, str] = {}     # relId -> file extension (.png, .jpg)
+        self._filename_map: Dict[str, str] = {}  # relId -> original filename
         self._load_images()
     
     def _load_images(self):
@@ -840,7 +844,6 @@ class ImageExtractor:
                 try:
                     rels_content = zf.read('word/_rels/document.xml.rels')
                 except KeyError:
-                    # 尝试其他可能的关系文件路径
                     try:
                         rels_content = zf.read('word/_rels/_rels.document.xml.rels')
                     except KeyError:
@@ -857,7 +860,6 @@ class ImageExtractor:
                         rel_type = rel.get('Type', '')
                         
                         if 'image' in rel_type.lower() and target:
-                            # 目标可能是相对路径，如 "media/image1.png"
                             if not target.startswith('media/'):
                                 target = 'media/' + target
                             rel_to_media[rel_id] = target
@@ -868,62 +870,109 @@ class ImageExtractor:
                         image_data = zf.read(filename)
                         base64_data = base64.b64encode(image_data).decode('utf-8')
                         
-                        # 获取文件扩展名
                         ext = os.path.splitext(filename)[1].lower()
                         mime_type = self.IMAGE_FORMATS.get(ext, 'image/png')
-                        
-                        # 构建 data URI
                         data_uri = f"data:{mime_type};base64,{base64_data}"
+                        base_name = os.path.basename(filename)
                         
-                        # 尝试通过关系找到对应的 relId
+                        # 通过关系找到对应的 relId
+                        matched_relid = None
                         for rel_id, media_path in rel_to_media.items():
                             if media_path in filename or filename.endswith(media_path.replace('media/', '')):
                                 self._image_cache[rel_id] = data_uri
+                                self._raw_cache[rel_id] = image_data
+                                self._ext_cache[rel_id] = ext
+                                self._filename_map[rel_id] = base_name
+                                matched_relid = rel_id
                         
-                        # 如果没找到关系，直接用文件名作为 key
-                        if filename not in self._image_cache.values():
-                            # 使用序号作为 key
+                        # 没找到关系，用序号作为 key
+                        if matched_relid is None:
                             key = f"img_{len(self._image_cache)}"
                             self._image_cache[key] = data_uri
+                            self._raw_cache[key] = image_data
+                            self._ext_cache[key] = ext
+                            self._filename_map[key] = base_name
         
-        except Exception as e:
-            # 如果加载失败，静默失败（不影响文档转换）
+        except Exception:
             pass
     
     def get_image_by_relid(self, rel_id: str) -> Optional[str]:
+        """通过关系ID获取图片的 Base64 数据（data URI 格式）"""
+        return self._image_cache.get(rel_id)
+    
+    def export_to_file(self, rel_id: str, output_dir: str, counter: int) -> Optional[str]:
         """
-        通过关系ID获取图片的 Base64 数据
+        导出图片到文件，返回相对路径
         
         Args:
-            rel_id: 关系ID（如 "rId8"）
-            
+            rel_id: 关系ID
+            output_dir: 输出目录（相对于 doc_dir）
+            counter: 图片序号
+        
         Returns:
-            Base64 编码的图片数据（data URI 格式），或 None
+            相对路径如 "images/img_001.png"，或 None
         """
-        return self._image_cache.get(rel_id)
+        raw = self._raw_cache.get(rel_id)
+        if not raw:
+            return None
+        
+        ext = self._ext_cache.get(rel_id, '.png')
+        img_dir = os.path.join(self.doc_dir, output_dir)
+        os.makedirs(img_dir, exist_ok=True)
+        
+        img_name = f"img_{counter:03d}{ext}"
+        img_path = os.path.join(img_dir, img_name)
+        
+        with open(img_path, 'wb') as f:
+            f.write(raw)
+        
+        return f"{output_dir}/{img_name}"
+    
+    def get_markdown_ref(self, rel_id: str, base64_mode: bool = True,
+                         output_dir: str = "images", counter: int = 1) -> str:
+        """
+        生成 Markdown 图片引用
+        
+        Args:
+            rel_id: 关系ID
+            base64_mode: True=内嵌Base64, False=导出文件
+            output_dir: 文件导出目录
+            counter: 图片序号
+        
+        Returns:
+            Markdown 图片引用字符串
+        """
+        if base64_mode:
+            data_uri = self._image_cache.get(rel_id)
+            if data_uri:
+                return f"![image]({data_uri})"
+            return ""
+        else:
+            path = self.export_to_file(rel_id, output_dir, counter)
+            if path:
+                return f"![image]({path})"
+            return ""
     
     def get_all_images(self) -> Dict[str, str]:
         """获取所有图片"""
         return self._image_cache.copy()
     
     @staticmethod
-    def extract_from_paragraph(paragraph, image_extractor: 'ImageExtractor') -> List[Tuple[str, str]]:
+    def extract_from_paragraph(paragraph, image_extractor: 'ImageExtractor') -> List[str]:
         """
-        从段落中提取图片
+        从段落中提取图片，返回 Markdown 图片引用列表
         
         Args:
             paragraph: python-docx Paragraph 对象
             image_extractor: ImageExtractor 实例
-            
+        
         Returns:
-            [(rel_id, base64_data), ...] 图片列表
+            [markdown_image_ref, ...] 图片引用列表
         """
         images = []
         
         for run in paragraph.runs:
-            # 检查 run 中是否有图片
             if hasattr(run, '_element'):
-                # 查找 inline 图片
                 for drawing in run._element.findall('.//{*}drawing'):
                     for inline in drawing.findall('.//{*}inline'):
                         for blip in inline.findall('.//{*}blip'):
@@ -931,7 +980,7 @@ class ImageExtractor:
                             if embed:
                                 base64_data = image_extractor.get_image_by_relid(embed)
                                 if base64_data:
-                                    images.append((embed, base64_data))
+                                    images.append(embed)
         
         return images
 
@@ -945,6 +994,8 @@ class DocxToMarkdownConverter:
         self.paragraph_merger = ParagraphMerger(self.config.merge_paragraphs)
         self.validator = ValidationReport()
         self.numbering_extractor: Optional[NumberingExtractor] = None
+        self.image_extractor: Optional[ImageExtractor] = None
+        self._image_counter: int = 0
         
         # 跟踪最大标题级别
         self.max_heading_level: int = 1
@@ -957,6 +1008,8 @@ class DocxToMarkdownConverter:
         self.paragraph_merger.reset()
         self.validator = ValidationReport()
         self.numbering_extractor = None
+        self.image_extractor = None
+        self._image_counter = 0
     
     def convert(self, doc_path: str, output_path: Optional[str] = None) -> Tuple[str, Dict]:
         """
@@ -981,6 +1034,10 @@ class DocxToMarkdownConverter:
         
         # 初始化编号提取器
         self.numbering_extractor = NumberingExtractor(doc)
+        
+        # 初始化图片提取器
+        if self.config.image_enabled:
+            self.image_extractor = ImageExtractor(doc_path)
         
         # 提取页眉页脚文本
         header_footer_text = set()
@@ -1037,6 +1094,21 @@ class DocxToMarkdownConverter:
                 
                 para_type, content = result
                 
+                # 提取图片
+                image_md_lines = []
+                if self.image_extractor and self.config.image_enabled:
+                    img_relids = ImageExtractor.extract_from_paragraph(para, self.image_extractor)
+                    for relid in img_relids:
+                        self._image_counter += 1
+                        md_ref = self.image_extractor.get_markdown_ref(
+                            relid,
+                            base64_mode=self.config.image_to_base64,
+                            output_dir="images",
+                            counter=self._image_counter
+                        )
+                        if md_ref:
+                            image_md_lines.append(md_ref)
+                
                 if para_type == "heading":
                     # 标题：先输出缓冲区中的段落
                     if pending_paragraph_buffer:
@@ -1048,6 +1120,8 @@ class DocxToMarkdownConverter:
                     # 处理标题（保留目录编号）
                     md_lines.append(content)
                     md_lines.append('')
+                    # 标题中的图片
+                    md_lines.extend(image_md_lines)
                 
                 elif para_type == "list":
                     # 列表：先输出缓冲区中的段落
@@ -1058,6 +1132,8 @@ class DocxToMarkdownConverter:
                         pending_paragraph_buffer = []
                     
                     md_lines.append(content)
+                    # 列表中的图片
+                    md_lines.extend(image_md_lines)
                 
                 elif para_type == "subheading":
                     # 启发式检测的小标题：输出缓冲区，然后添加小标题
@@ -1070,10 +1146,14 @@ class DocxToMarkdownConverter:
                     # 使用4级标题（因为是小标题）
                     md_lines.append(f"#### {content}")
                     md_lines.append('')
+                    # 小标题中的图片
+                    md_lines.extend(image_md_lines)
                 
                 elif para_type == "paragraph":
                     # 段落：加入缓冲区
                     pending_paragraph_buffer.append(content)
+                    # 图片也加入缓冲区
+                    pending_paragraph_buffer.extend(image_md_lines)
                 
                 elif para_type == "empty":
                     # 空行：输出缓冲区中的段落
@@ -1082,6 +1162,8 @@ class DocxToMarkdownConverter:
                         md_lines.append(merged)
                         md_lines.append('')
                         pending_paragraph_buffer = []
+                    # 空段落中的图片
+                    md_lines.extend(image_md_lines)
                 elif para_type == "separator":
                     # 分隔标记：输出缓冲区
                     if pending_paragraph_buffer:
@@ -1089,6 +1171,8 @@ class DocxToMarkdownConverter:
                         md_lines.append(merged)
                         md_lines.append('')
                         pending_paragraph_buffer = []
+                    # 分隔标记中的图片
+                    md_lines.extend(image_md_lines)
                 
                 last_para_idx = para_idx
             

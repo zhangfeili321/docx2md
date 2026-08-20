@@ -41,6 +41,8 @@ class ConversionThread(threading.Thread):
                 fix_chinese_spacing=self.config.get('fix_chinese_spacing', True),
                 remove_page_numbers=self.config.get('remove_page_numbers', True),
                 merge_paragraphs=self.config.get('merge_paragraphs', False),
+                image_enabled=self.config.get('image_enabled', True),
+                image_to_base64=self.config.get('image_to_base64', True),
             )
             
             self.callback('progress', 20)
@@ -82,6 +84,8 @@ class BatchConversionThread(threading.Thread):
                 fix_chinese_spacing=self.config.get('fix_chinese_spacing', True),
                 remove_page_numbers=self.config.get('remove_page_numbers', True),
                 merge_paragraphs=self.config.get('merge_paragraphs', False),
+                image_enabled=self.config.get('image_enabled', True),
+                image_to_base64=self.config.get('image_to_base64', True),
             )
             
             total = len(self.file_list)
@@ -221,6 +225,8 @@ class DocxToMarkdownGUI:
         self.remove_page_numbers_var = tk.BooleanVar(value=True)
         self.merge_paragraphs_var = tk.BooleanVar(value=False)
         self.enable_subheading_var = tk.BooleanVar(value=True)
+        self.enable_image_var = tk.BooleanVar(value=True)
+        self.image_base64_var = tk.BooleanVar(value=True)
         self.batch_mode_var = tk.BooleanVar(value=False)
         
         def small_checkbox(parent, text, var):
@@ -230,8 +236,14 @@ class DocxToMarkdownGUI:
         small_checkbox(options_frame, "表格", self.enable_table_var)
         small_checkbox(options_frame, "中文间距", self.enable_chinese_fix_var)
         small_checkbox(options_frame, "移除页码", self.remove_page_numbers_var)
-        small_checkbox(options_frame, "段落合并", self.merge_paragraphs_var)
-        small_checkbox(options_frame, "小标题检测", self.enable_subheading_var)
+        small_checkbox(options_frame, '段落合并', self.merge_paragraphs_var)
+        small_checkbox(options_frame, '小标题检测', self.enable_subheading_var)
+        
+        # 图片选项单独放一行
+        img_frame = tk.Frame(main_frame, bg=bg_color)
+        img_frame.pack(fill='x', pady=2)
+        small_checkbox(img_frame, '图片提取', self.enable_image_var)
+        small_checkbox(img_frame, '图片Base64', self.image_base64_var)
         
         # 批量模式单独放一行
         batch_frame = tk.Frame(main_frame, bg=bg_color)
@@ -429,6 +441,8 @@ class DocxToMarkdownGUI:
             'fix_chinese_spacing': self.enable_chinese_fix_var.get(),
             'remove_page_numbers': self.remove_page_numbers_var.get(),
             'merge_paragraphs': self.merge_paragraphs_var.get(),
+            'image_enabled': self.enable_image_var.get(),
+            'image_to_base64': self.image_base64_var.get(),
         }
         
         # 启动转换线程
@@ -451,6 +465,8 @@ class DocxToMarkdownGUI:
             'fix_chinese_spacing': self.enable_chinese_fix_var.get(),
             'remove_page_numbers': self.remove_page_numbers_var.get(),
             'merge_paragraphs': self.merge_paragraphs_var.get(),
+            'image_enabled': self.enable_image_var.get(),
+            'image_to_base64': self.image_base64_var.get(),
         }
         
         # 启动批量转换线程
