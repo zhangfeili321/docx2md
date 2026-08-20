@@ -1284,6 +1284,10 @@ class DocxToMarkdownConverter:
                 return ("list", f"{number_prefix.strip()} {text}")
             return ("list", f"- {text}")
         
+        # 检测目录条目（如"1概述"、"1.1项目综述"、"2.1.3物探方法试验"）
+        if self._is_toc_entry(text):
+            return ("list", f"- {text}")
+        
         # 启发式小标题检测
         if HeadingDetector.is_likely_subheading(text, next_text):
             return ("subheading", text)
@@ -1340,6 +1344,19 @@ class DocxToMarkdownConverter:
         style_lower = style_name.lower()
         list_indicators = ['list', 'bullet', 'number', '列表', '编号']
         return any(ind in style_lower for ind in list_indicators)
+    
+    def _is_toc_entry(self, text: str) -> bool:
+        """判断是否为目录条目（如"1概述"、"1.1项目综述"、"2.1.3物探方法试验"）"""
+        if not text or len(text) > 100:
+            return False
+        
+        # 数字开头 + 中文内容：如 "1概述"、"1.1项目综述"、"2.1.3物探方法试验"
+        import re
+        toc_pattern = re.compile(r'^\d+(\.\d+)*\s*[\u4e00-\u9fff]')
+        if toc_pattern.match(text):
+            return True
+        
+        return False
     
     def _process_tables(self, doc, doc_path: str, md_lines: List[str]) -> List[str]:
         """处理文档中的表格"""
