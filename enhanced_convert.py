@@ -37,7 +37,6 @@ class ProcessingConfig:
     enable_table: bool = True           # 启用表格转换
     fix_chinese_spacing: bool = True   # 修复中文间距
     remove_page_numbers: bool = True    # 移除页码
-    merge_paragraphs: bool = False      # 合并段落（保守策略）
     keep_headers_footers: bool = False # 保留页眉页脚
     image_enabled: bool = True          # 启用图片提取
     image_to_base64: bool = False       # 图片内嵌Base64（False=导出到文件）
@@ -212,67 +211,6 @@ class HeadingDetector:
         """从样式名提取级别数字"""
         is_heading, level = cls.is_heading_style(style_name)
         return level if is_heading else 0
-
-
-class ParagraphMerger:
-    """段落合并器 - 保守策略"""
-    
-    def __init__(self, enabled: bool = False):
-        self.enabled = enabled
-        self.prev_para: Optional[Dict] = None
-        self.should_merge: bool = False
-    
-    def reset(self):
-        """重置状态"""
-        self.prev_para = None
-        self.should_merge = False
-    
-    def should_merge_paragraph(self, current: Dict) -> bool:
-        """
-        决定是否合并当前段落与上一个段落
-        
-        保守策略：仅在以下全部条件满足时合并
-        1. 启用了合并选项
-        2. 上一个段落和当前段落都是正文（Normal样式）
-        3. 当前段落不是列表项
-        4. 当前段落不是标题
-        """
-        if not self.enabled:
-            return False
-        
-        if self.prev_para is None:
-            self.prev_para = current
-            return False
-        
-        # 获取样式信息
-        prev_style = self.prev_para.get('style_name', '')
-        curr_style = current.get('style_name', '')
-        
-        # 如果任一是非正文样式，不合并
-        if not self._is_normal_style(prev_style) or not self._is_normal_style(curr_style):
-            self.prev_para = current
-            return False
-        
-        # 如果当前是列表项，不合并
-        if current.get('is_list', False):
-            self.prev_para = current
-            return False
-        
-        # 如果当前是标题，不合并
-        if current.get('is_heading', False):
-            self.prev_para = current
-            return False
-        
-        self.prev_para = current
-        return True
-    
-    @staticmethod
-    def _is_normal_style(style_name: str) -> bool:
-        """判断是否为正文样式"""
-        if not style_name:
-            return True
-        normal_patterns = ['Normal', '正文', 'Body', 'Text', 'Paragraph']
-        return any(p.lower() in style_name.lower() for p in normal_patterns)
 
 
 class TableConverter:
@@ -991,7 +929,6 @@ class DocxToMarkdownConverter:
     def __init__(self, config: Optional[ProcessingConfig] = None):
         self.config = config or ProcessingConfig()
         self.header_footer_handler = HeaderFooterHandler(self.config)
-        self.paragraph_merger = ParagraphMerger(self.config.merge_paragraphs)
         self.validator = ValidationReport()
         self.numbering_extractor: Optional[NumberingExtractor] = None
         self.image_extractor: Optional[ImageExtractor] = None
@@ -1005,7 +942,6 @@ class DocxToMarkdownConverter:
         """重置转换器状态"""
         self.max_heading_level = 1
         self.found_heading_levels = set()
-        self.paragraph_merger.reset()
         self.validator = ValidationReport()
         self.numbering_extractor = None
         self.image_extractor = None
@@ -1057,7 +993,6 @@ class DocxToMarkdownConverter:
         
         # 处理段落和表格（按文档顺序）
         md_lines = []
-        pending_paragraph_buffer: List[str] = []  # 待合并的段落缓冲区
         
         # 构建表格元素到表格对象的映射
         table_element_to_obj = {tbl._tbl: tbl for tbl in doc.tables}
@@ -1110,80 +1045,31 @@ class DocxToMarkdownConverter:
                             image_md_lines.append(md_ref)
                 
                 if para_type == "heading":
-                    # 标题：先输出缓冲区中的段落
-                    if pending_paragraph_buffer:
-                        merged = ' '.join(pending_paragraph_buffer)
-                        md_lines.append(merged)
-                        md_lines.append('')
-                        pending_paragraph_buffer = []
-                    
-                    # 处理标题（保留目录编号）
                     md_lines.append(content)
                     md_lines.append('')
-                    # 标题中的图片
                     md_lines.extend(image_md_lines)
                 
                 elif para_type == "list":
-                    # 列表：先输出缓冲区中的段落
-                    if pending_paragraph_buffer:
-                        merged = ' '.join(pending_paragraph_buffer)
-                        md_lines.append(merged)
-                        md_lines.append('')
-                        pending_paragraph_buffer = []
-                    
                     md_lines.append(content)
-                    # 列表中的图片
                     md_lines.extend(image_md_lines)
                 
                 elif para_type == "subheading":
-                    # 启发式检测的小标题：输出缓冲区，然后添加小标题
-                    if pending_paragraph_buffer:
-                        merged = ' '.join(pending_paragraph_buffer)
-                        md_lines.append(merged)
-                        md_lines.append('')
-                        pending_paragraph_buffer = []
-                    
-                    # 使用4级标题（因为是小标题）
                     md_lines.append(f"#### {content}")
                     md_lines.append('')
-                    # 小标题中的图片
                     md_lines.extend(image_md_lines)
                 
                 elif para_type == "paragraph":
-                    # 段落：加入缓冲区
-                    pending_paragraph_buffer.append(content)
-                    # 图片也加入缓冲区
-                    pending_paragraph_buffer.extend(image_md_lines)
+                    md_lines.append(content)
+                    md_lines.extend(image_md_lines)
                 
                 elif para_type == "empty":
-                    # 空行：输出缓冲区中的段落
-                    if pending_paragraph_buffer:
-                        merged = ' '.join(pending_paragraph_buffer)
-                        md_lines.append(merged)
-                        md_lines.append('')
-                        pending_paragraph_buffer = []
-                    # 空段落中的图片
                     md_lines.extend(image_md_lines)
                 elif para_type == "separator":
-                    # 分隔标记：输出缓冲区
-                    if pending_paragraph_buffer:
-                        merged = ' '.join(pending_paragraph_buffer)
-                        md_lines.append(merged)
-                        md_lines.append('')
-                        pending_paragraph_buffer = []
-                    # 分隔标记中的图片
                     md_lines.extend(image_md_lines)
                 
                 last_para_idx = para_idx
             
             elif tag == 'tbl' and self.config.enable_table:  # 表格
-                # 处理末尾的段落缓冲区
-                if pending_paragraph_buffer:
-                    merged = ' '.join(pending_paragraph_buffer)
-                    md_lines.append(merged)
-                    md_lines.append('')
-                    pending_paragraph_buffer = []
-                
                 # 找到对应的表格对象
                 table_obj = table_element_to_obj.get(child)
                 if table_obj and table_obj.rows:
@@ -1192,11 +1078,6 @@ class DocxToMarkdownConverter:
                     if table_md:
                         md_lines.append(table_md)
                         md_lines.append('')
-        
-        # 处理末尾的段落缓冲区
-        if pending_paragraph_buffer:
-            merged = ' '.join(pending_paragraph_buffer)
-            md_lines.append(merged)
         
         # 合并为最终 Markdown
         markdown_content = '\n\n'.join(md_lines)
@@ -1284,6 +1165,10 @@ class DocxToMarkdownConverter:
                 return ("list", f"{number_prefix.strip()} {text}")
             return ("list", f"- {text}")
         
+        # 检测手动编号列表（如"1）xxx"、"2、xxx"、"（3）xxx"）
+        if self._is_manual_numbered_list(text):
+            return ("list", f"- {text}")
+        
         # 检测目录条目（如"1概述"、"1.1项目综述"、"2.1.3物探方法试验"）
         if self._is_toc_entry(text):
             return ("list", f"- {text}")
@@ -1358,6 +1243,25 @@ class DocxToMarkdownConverter:
         
         return False
     
+    def _is_manual_numbered_list(self, text: str) -> bool:
+        """判断是否为手动编号列表项（如"1）xxx"、"2、xxx"、"（3）xxx"、"1. xxx"）"""
+        if not text or len(text) < 3:
+            return False
+        
+        import re
+        # 匹配开头的手动编号：数字 + ）、) 、. 、、 等
+        patterns = [
+            r'^\d+[）\)]',          # 1） 2） 3) 
+            r'^\d+[、]',            # 1、 2、 3、
+            r'^[（\(]\d+[）\)]',    # （1） (2) （3）
+            r'^[①②③④⑤⑥⑦⑧⑨⑩]',  # ① ② ③
+            r'^[一二三四五六七八九十]+[、）]',  # 一、 二、 三）
+        ]
+        for pattern in patterns:
+            if re.match(pattern, text):
+                return True
+        return False
+    
     def _process_tables(self, doc, doc_path: str, md_lines: List[str]) -> List[str]:
         """处理文档中的表格"""
         for table in doc.tables:
@@ -1430,7 +1334,6 @@ def main():
     parser.add_argument('--no-table', action='store_true', help='禁用表格转换')
     parser.add_argument('--no-chinese-fix', action='store_true', help='禁用中文间距修复')
     parser.add_argument('--keep-page-numbers', action='store_true', help='保留页码')
-    parser.add_argument('--merge-paragraphs', action='store_true', help='启用段落合并')
     
     args = parser.parse_args()
     
@@ -1438,7 +1341,6 @@ def main():
         enable_table=not args.no_table,
         fix_chinese_spacing=not args.no_chinese_fix,
         remove_page_numbers=not args.keep_page_numbers,
-        merge_paragraphs=args.merge_paragraphs
     )
     
     content, metadata = convert_docx_to_markdown(args.input, args.output, config)

@@ -40,7 +40,6 @@ class ConversionThread(threading.Thread):
                 enable_table=self.config.get('enable_table', True),
                 fix_chinese_spacing=self.config.get('fix_chinese_spacing', True),
                 remove_page_numbers=self.config.get('remove_page_numbers', True),
-                merge_paragraphs=self.config.get('merge_paragraphs', False),
                 image_enabled=self.config.get('image_enabled', True),
                 image_to_base64=self.config.get('image_to_base64', False),
             )
@@ -83,7 +82,6 @@ class BatchConversionThread(threading.Thread):
                 enable_table=self.config.get('enable_table', True),
                 fix_chinese_spacing=self.config.get('fix_chinese_spacing', True),
                 remove_page_numbers=self.config.get('remove_page_numbers', True),
-                merge_paragraphs=self.config.get('merge_paragraphs', False),
                 image_enabled=self.config.get('image_enabled', True),
                 image_to_base64=self.config.get('image_to_base64', False),
             )
@@ -223,7 +221,6 @@ class DocxToMarkdownGUI:
         self.enable_table_var = tk.BooleanVar(value=True)
         self.enable_chinese_fix_var = tk.BooleanVar(value=True)
         self.remove_page_numbers_var = tk.BooleanVar(value=True)
-        self.merge_paragraphs_var = tk.BooleanVar(value=False)
         self.enable_subheading_var = tk.BooleanVar(value=True)
         self.enable_image_var = tk.BooleanVar(value=True)
         self.image_base64_var = tk.BooleanVar(value=False)
@@ -235,8 +232,7 @@ class DocxToMarkdownGUI:
         
         small_checkbox(options_frame, "表格", self.enable_table_var)
         small_checkbox(options_frame, "中文间距", self.enable_chinese_fix_var)
-        small_checkbox(options_frame, "移除页码", self.remove_page_numbers_var)
-        small_checkbox(options_frame, '段落合并', self.merge_paragraphs_var)
+        small_checkbox(options_frame, '移除页码', self.remove_page_numbers_var)
         small_checkbox(options_frame, '小标题检测', self.enable_subheading_var)
         
         # 图片选项单独放一行
@@ -440,7 +436,6 @@ class DocxToMarkdownGUI:
             'enable_table': self.enable_table_var.get(),
             'fix_chinese_spacing': self.enable_chinese_fix_var.get(),
             'remove_page_numbers': self.remove_page_numbers_var.get(),
-            'merge_paragraphs': self.merge_paragraphs_var.get(),
             'image_enabled': self.enable_image_var.get(),
             'image_to_base64': self.image_base64_var.get(),
         }
@@ -464,7 +459,6 @@ class DocxToMarkdownGUI:
             'enable_table': self.enable_table_var.get(),
             'fix_chinese_spacing': self.enable_chinese_fix_var.get(),
             'remove_page_numbers': self.remove_page_numbers_var.get(),
-            'merge_paragraphs': self.merge_paragraphs_var.get(),
             'image_enabled': self.enable_image_var.get(),
             'image_to_base64': self.image_base64_var.get(),
         }
