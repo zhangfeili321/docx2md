@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
 Enhanced DOCX to Markdown Converter - 通用工具
-Version: 1.1.0
+Version: 1.2.0
 
 基于以下最佳实践：
 1. 标题检测：直接使用 Word 原生样式名
 2. 段落一致性：保守策略保留自然分段
 3. 表格处理：统一使用 HTML 格式，支持智能纵向合并检测
 4. 一致性检查：多维度验证
+5. 格式兼容：自动识别 .doc 和 .docx，.doc 通过 LibreOffice 自动转换
 
-适用于所有 DOCX 文件的通用转换工具
+适用于所有 DOCX/DOC 文件的通用转换工具
 """
 
 import os
@@ -18,6 +19,9 @@ import re
 import json
 import argparse
 import zipfile
+import tempfile
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Tuple, List, Set
 from dataclasses import dataclass, field
@@ -1308,6 +1312,134 @@ class DocxToMarkdownConverter:
             )
 
 
+def _find_libreoffice() -> Optional[str]:
+    """查找 LibreOffice 可执行文件路径"""
+    # Windows 常见安装路径
+    candidates = [
+        r"C:\Program Files\LibreOffice\program\soffice.exe",
+        r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    # 尝试 PATH 查找
+    for cmd in ["soffice", "soffice.exe"]:
+        found = shutil.which(cmd)
+        if found:
+            return found
+    return None
+
+
+def _convert_doc_to_docx_via_libreoffice(doc_path: str) -> str:
+    """
+    通过 LibreOffice 无头模式将 .doc 转为 .docx
+    
+    Args:
+        doc_path: .doc 文件路径
+    
+    Returns:
+        转换后的 .docx 临时文件路径
+    
+    Raises:
+        RuntimeError: LibreOffice 未安装或转换失败
+    """
+    soffice = _find_libreoffice()
+    if not soffice:
+        raise RuntimeError(
+            "未找到 LibreOffice。\n"
+            ".doc 文件需要 LibreOffice 进行转换。\n"
+            "请从 https://www.libreoffice.org/download/ 下载安装。"
+        )
+    
+    doc_path = os.path.abspath(doc_path)
+    work_dir = tempfile.mkdtemp(prefix="docx2md_")
+    
+    try:
+        cmd = [
+            soffice,
+            "--headless",
+            "--convert-to", "docx",
+            "--outdir", work_dir,
+            doc_path
+        ]
+        
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120  # 大文件最多等2分钟
+        )
+        
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"LibreOffice 转换失败 (exit={result.returncode}):\n"
+                f"{result.stderr.strip()}"
+            )
+        
+        # 查找生成的 docx 文件
+        base_name = os.path.splitext(os.path.basename(doc_path))[0]
+        docx_path = os.path.join(work_dir, f"{base_name}.docx")
+        
+        if not os.path.isfile(docx_path):
+            # 可能是文件名编码问题，尝试列出目录
+            files = os.listdir(work_dir)
+            docx_files = [f for f in files if f.endswith('.docx')]
+            if docx_files:
+                docx_path = os.path.join(work_dir, docx_files[0])
+            else:
+                raise RuntimeError(
+                    f"LibreOffice 未生成 .docx 文件。\n"
+                    f"工作目录内容: {files}"
+                )
+        
+        return docx_path
+        
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("LibreOffice 转换超时（120秒），文件可能过大或损坏。")
+    except Exception as e:
+        if isinstance(e, RuntimeError):
+            raise
+        raise RuntimeError(f"LibreOffice 转换异常: {str(e)}")
+
+
+def detect_and_convert(input_path: str, output_path: Optional[str] = None,
+                       config: Optional[ProcessingConfig] = None) -> Tuple[str, Dict]:
+    """
+    自动识别文件格式并转换：支持 .doc 和 .docx
+    
+    Args:
+        input_path: 输入文件路径 (.doc 或 .docx)
+        output_path: 输出 Markdown 文件路径（可选）
+        config: 处理配置（可选）
+    
+    Returns:
+        (markdown_content, metadata)
+    """
+    input_path_lower = input_path.lower()
+    
+    if input_path_lower.endswith('.docx'):
+        return convert_docx_to_markdown(input_path, output_path, config)
+    
+    elif input_path_lower.endswith('.doc'):
+        # 先转 docx 再转换
+        temp_docx = _convert_doc_to_docx_via_libreoffice(input_path)
+        try:
+            content, metadata = convert_docx_to_markdown(temp_docx, output_path, config)
+            metadata["format"] = "doc"  # 标记原始格式
+            metadata["source"] = input_path
+            return content, metadata
+        finally:
+            # 清理临时文件
+            temp_dir = os.path.dirname(temp_docx)
+            try:
+                shutil.rmtree(temp_dir)
+            except OSError:
+                pass
+    
+    else:
+        return "", {"error": f"不支持的文件格式: {input_path}。仅支持 .doc 和 .docx。"}
+
+
 def convert_docx_to_markdown(doc_path: str, output_path: Optional[str] = None,
                              config: Optional[ProcessingConfig] = None) -> Tuple[str, Dict]:
     """便捷转换函数"""
@@ -1322,13 +1454,14 @@ def main():
         epilog="""
 示例:
   python enhanced_convert.py input.docx -o output.md
+  python enhanced_convert.py input.doc -o output.md
   python enhanced_convert.py input.docx --json
-  python enhanced_convert.py input.docx --merge-paragraphs
-  
-支持所有 DOCX 文件的通用转换，保留标题级别、段落一致性、表格格式。
+
+支持 DOCX 和 DOC 文件的通用转换，保留标题级别、段落一致性、表格格式。
+DOC 文件需要 LibreOffice（自动检测安装路径）。
         """
     )
-    parser.add_argument('input', help='输入 DOCX 文件路径')
+    parser.add_argument('input', help='输入文件路径 (.doc 或 .docx)')
     parser.add_argument('-o', '--output', help='输出 Markdown 文件路径')
     parser.add_argument('--json', action='store_true', help='输出元数据为 JSON')
     parser.add_argument('--no-table', action='store_true', help='禁用表格转换')
@@ -1343,7 +1476,7 @@ def main():
         remove_page_numbers=not args.keep_page_numbers,
     )
     
-    content, metadata = convert_docx_to_markdown(args.input, args.output, config)
+    content, metadata = detect_and_convert(args.input, args.output, config)
     
     if "error" in metadata:
         print(f"错误: {metadata['error']}", file=sys.stderr)
@@ -1356,6 +1489,7 @@ def main():
         print(json.dumps(metadata, indent=2, ensure_ascii=False), file=sys.stderr)
     else:
         print(f"\n转换完成:", file=sys.stderr)
+        print(f"  源格式: {metadata.get('format', 'docx')}", file=sys.stderr)
         print(f"  标题级别: {metadata.get('max_heading_level', 'N/A')}", file=sys.stderr)
         print(f"  发现级别: {metadata.get('found_heading_levels', [])}", file=sys.stderr)
         print(f"  验证结果: {'通过' if metadata['validation']['is_valid'] else '有问题'}", file=sys.stderr)

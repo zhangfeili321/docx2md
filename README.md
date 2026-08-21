@@ -1,93 +1,67 @@
-# Markdown Processor - 快速上手指南
+# DOCX/DOC to Markdown 转换器
 
-## 🚀 一句话说明
+## 一句话说明
 
-把 PDF 文档（尤其是带公式、表格的那种）转成 Markdown 格式，同时保留数学公式的 LaTeX 格式和表格结构。
+把 Word 文档（.docx / .doc）转成 Markdown 格式，保留标题层级、表格结构、自动编号。
 
-## 📦 核心功能
+## 核心功能
 
 | 功能 | 说明 |
 |------|------|
-| 📄 **多栏布局** | 自动识别单栏/双栏/三栏，重建正确阅读顺序 |
-| 🧮 **公式识别** | `E=mc²` → `$E=mc^{2}$` |
-| 📊 **表格提取** | PDF 表格 → Markdown 或 HTML 表格 |
-| 🖼️ **图片提取** | 自动提取并生成引用 |
+| 标题识别 | 自动识别 Word 原生标题样式（Heading 1~6） |
+| 表格转换 | 简单表格→Markdown，复杂表格→HTML |
+| 编号保留 | 保留 Word 自动编号（多级编号） |
+| 格式兼容 | 支持 .docx 和 .doc（.doc 需 LibreOffice） |
+| 批量转换 | 支持多文件批量处理 |
+| 图形界面 | Tkinter GUI，拖放文件即可转换 |
 
-## 🎯 快速使用
+## 快速使用
 
-### 命令行（最简单）
-
-```bash
-cd /root/.openclaw/workspace/markdown_processor
-
-# 转换单个 PDF
-python3 advanced_processor.py /path/to/your.pdf
-
-# 指定输出目录
-python3 advanced_processor.py /path/to/your.pdf ./output
-```
-
-输出会在 `./output/your.md` 和图片文件夹。
-
-### Python 代码中使用
-
-```python
-import sys
-sys.path.insert(0, '/root/.openclaw/workspace/markdown_processor')
-
-from advanced_processor import AdvancedMarkdownProcessor, ProcessingConfig
-
-# 创建处理器
-processor = AdvancedMarkdownProcessor(ProcessingConfig(
-    detect_columns=True,    # 多栏检测
-    detect_formulas=True,   # 公式识别
-    detect_tables=True,     # 表格检测
-    extract_images=True     # 图片提取
-))
-
-# 处理 PDF
-output_path = processor.process_pdf("input.pdf", "output_folder")
-print(f"已生成: {output_path}")
-```
-
-## ✅ 实际测试结果
-
-```
-E = mc²              → ✓ 公式 (置信度: 0.95) → $E=mc^{2}$
-x² + y² = z²         → ✓ 公式 (置信度: 0.95) → $x^{2}+y^{2}=z^{2}$
-2x + 3y = 10         → ✓ 公式 (置信度: 0.70) → $2x+3y=10$
-```
-
-## 📁 文件位置
-
-```
-/root/.openclaw/workspace/markdown_processor/
-├── advanced_processor.py       # 主程序（用这个）
-├── formula_recognizer.py       # 公式识别
-├── table_processor.py          # 表格处理
-├── column_layout_detector.py   # 多栏检测
-├── integrated_test.py          # 测试脚本
-└── SKILL.md                    # 详细文档
-```
-
-## 🧪 运行测试
+### 命令行
 
 ```bash
-cd /root/.openclaw/workspace/markdown_processor
+# 转换 DOCX
+python enhanced_convert.py input.docx -o output.md
 
-# 测试已有 PDF
-python3 integrated_test.py
-
-# 测试你自己的 PDF
-python3 integrated_test.py /path/to/your.pdf
+# 转换 DOC（需 LibreOffice）
+python enhanced_convert.py input.doc -o output.md
 ```
 
-## 💡 典型应用场景
+### GUI
 
-1. **处理技术文档** - 保留公式和表格结构
-2. **学术论文转换** - LaTeX 公式直接可用
-3. **报告整理** - 批量处理 PDF 报告
+```bash
+python gui_app_tkinter.py
+```
+
+### 打包 EXE
+
+```bash
+pip install pyinstaller
+python -m PyInstaller gui_app.spec --clean -y
+```
+
+## 系统要求
+
+- Python 3.8+
+- python-docx, Pillow, lxml
+- 转换 .doc 需要安装 LibreOffice
+
+## 文件说明
+
+```
+├── enhanced_convert.py      # 核心转换引擎（CLI/GUI 共用）
+├── gui_app_tkinter.py      # Tkinter GUI 界面
+├── gui_app.spec            # PyInstaller 打包配置
+├── requirements.txt         # Python 依赖
+├── 使用手册.md             # 用户使用文档
+├── 软件开发说明书.md       # 技术文档
+└── 打包.bat               # Windows 打包脚本
+```
+
+## 版本
+
+**v1.2.0** - 新增 .doc 格式支持
 
 ---
 
-有问题？查看 `SKILL.md` 获取完整文档。
+**作者：章非**

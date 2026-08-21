@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DOCX to Markdown Converter - Tkinter GUI Application
+DOC/DOCX to Markdown Converter - Tkinter GUI Application
 DOCX转Markdown转换器 - Tkinter图形界面版本（内置Python，无需安装额外依赖）
 """
 
@@ -34,7 +34,7 @@ class ConversionThread(threading.Thread):
     
     def run(self):
         try:
-            from enhanced_convert import DocxToMarkdownConverter, ProcessingConfig
+            from enhanced_convert import detect_and_convert, ProcessingConfig
             
             config = ProcessingConfig(
                 enable_table=self.config.get('enable_table', True),
@@ -46,10 +46,7 @@ class ConversionThread(threading.Thread):
             
             self.callback('progress', 20)
             
-            converter = DocxToMarkdownConverter(config)
-            self.callback('progress', 50)
-            
-            content, metadata = converter.convert(self.input_path, self.output_path)
+            content, metadata = detect_and_convert(self.input_path, self.output_path, config)
             self.callback('progress', 80)
             
             if "error" in metadata:
@@ -76,7 +73,7 @@ class BatchConversionThread(threading.Thread):
     
     def run(self):
         try:
-            from enhanced_convert import DocxToMarkdownConverter, ProcessingConfig
+            from enhanced_convert import detect_and_convert, ProcessingConfig
             
             config = ProcessingConfig(
                 enable_table=self.config.get('enable_table', True),
@@ -100,8 +97,7 @@ class BatchConversionThread(threading.Thread):
                 output_path = os.path.join(dir_name, f"{base_name}.md")
                 
                 try:
-                    converter = DocxToMarkdownConverter(config)
-                    content, metadata = converter.convert(input_path, output_path)
+                    content, metadata = detect_and_convert(input_path, output_path, config)
                     
                     if "error" in metadata:
                         self.results.append((input_path, output_path, False, metadata))
@@ -341,16 +337,16 @@ class DocxToMarkdownGUI:
         if self.batch_mode_var.get():
             # 批量模式：选择多个文件
             file_paths = filedialog.askopenfilenames(
-                title="选择DOCX文件（批量）",
-                filetypes=[("DOCX文件", "*.docx"), ("所有文件", "*.*")]
+                title="选择文件（批量）",
+                filetypes=[("Word文档", "*.docx;*.doc"), ("DOCX文件", "*.docx"), ("DOC文件", "*.doc"), ("所有文件", "*.*")]
             )
             if file_paths:
                 self.set_input_files(list(file_paths))
         else:
             # 单文件模式
             file_path = filedialog.askopenfilename(
-                title="选择DOCX文件",
-                filetypes=[("DOCX文件", "*.docx"), ("所有文件", "*.*")]
+                title="选择文件",
+                filetypes=[("Word文档", "*.docx;*.doc"), ("DOCX文件", "*.docx"), ("DOC文件", "*.doc"), ("所有文件", "*.*")]
             )
             if file_path:
                 self.set_input_file(file_path)
@@ -415,7 +411,7 @@ class DocxToMarkdownGUI:
         elif self.input_file:
             self._start_single_conversion()
         else:
-            messagebox.showwarning("警告", "请先选择DOCX文件")
+            messagebox.showwarning("警告", "请先选择文件")
             return
     
     def _start_single_conversion(self):

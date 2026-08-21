@@ -1,31 +1,58 @@
-# AGENTS.md - DOCX to Markdown Converter
+# AGENTS.md - DOCX/DOC to Markdown Converter
 
 ## Project Overview
 
-**Type**: Python CLI tool + GUI for DOCX to Markdown conversion
+**Type**: Python CLI tool + GUI for DOCX/DOC to Markdown conversion
 **Language**: Python 3.8+
-**Location**: `F:\opencode workspace\docx-to-markdown\scripts`
+**Location**: `F:\my working space\docx2md`
 
 ---
 
 ## Build/Test Commands
 
 ```bash
-cd "F:\opencode workspace\docx-to-markdown\scripts"
+cd "F:\my working space\docx2md"
 
 # Run GUI
 python gui_app_tkinter.py
 
-# Run CLI conversion
+# Run CLI (DOCX)
 python enhanced_convert.py input.docx -o output.md
 
-# Test import (verify no syntax errors)
-python -c "from enhanced_convert import DocxToMarkdownConverter; print('OK')"
-python -c "from gui_app_tkinter import DocxToMarkdownGUI; print('OK')"
+# Run CLI (DOC, requires LibreOffice)
+python enhanced_convert.py input.doc -o output.md
+
+# Test import
+python -c "from enhanced_convert import detect_and_convert; print('OK')"
 
 # PyInstaller packaging
-pip install pyinstaller
 python -m PyInstaller gui_app.spec --clean -y
+```
+
+---
+
+## Architecture
+
+### Entry Points
+
+```
+enhanced_convert.py
+├── detect_and_convert()     # Unified entry: auto-detect .doc/.docx
+│   ├── .docx → convert_docx_to_markdown()
+│   └── .doc  → _convert_doc_to_docx_via_libreoffice() → convert_docx_to_markdown()
+├── _find_libreoffice()      # Locate LibreOffice installation
+├── DocxToMarkdownConverter  # Core conversion engine
+│   ├── NumberingExtractor   # Word auto-numbering
+│   ├── HeadingDetector      # Style-based heading detection
+│   ├── TableConverter       # Table → Markdown/HTML
+│   ├── ImageExtractor       # Image extraction
+│   └── TextPostProcessor    # Chinese spacing, empty line cleanup
+└── main()                   # CLI entry
+
+gui_app_tkinter.py
+├── ConversionThread         # Single-file conversion (background)
+├── BatchConversionThread    # Multi-file batch conversion
+└── DocxToMarkdownGUI        # Tkinter GUI
 ```
 
 ---
@@ -45,15 +72,18 @@ import sys
 import re
 import json
 import argparse
+import tempfile
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Tuple, List, Set
 from dataclasses import dataclass, field
 from enum import Enum
 
 # Third-party imports
+from lxml import etree
+from docx import Document
 from docx.oxml.ns import qn
-
-# Local imports (if any)
 ```
 
 ### 2. Naming Conventions
@@ -61,30 +91,12 @@ from docx.oxml.ns import qn
 | Type | Convention | Example |
 |------|------------|---------|
 | Classes | PascalCase | `ProcessingConfig`, `TableAnalyzer` |
-| Functions | snake_case | `convert_docx_to_markdown()` |
-| Private methods | `_` prefix | `_extract_header_footer_text()` |
-| Constants | UPPER_SNAKE | `CHINESE_PATTERN`, `DEFAULT_COLS` |
-| Variables | snake_case | `output_path`, `pdf_path`, `md_lines` |
-| Dataclass fields | snake_case | `enable_formula`, `detect_columns` |
-| Enum values | UPPER_SNAKE | `SIMPLE`, `MEDIUM`, `COMPLEX` |
+| Functions | snake_case | `detect_and_convert()` |
+| Private functions | `_` prefix | `_find_libreoffice()` |
+| Constants | UPPER_SNAKE | `CHINESE_PATTERN` |
+| Variables | snake_case | `output_path`, `md_lines` |
 
-### 3. Configuration Classes
-
-```python
-@dataclass
-class ProcessingConfig:
-    """Processing configuration with sensible defaults."""
-    enable_table: bool = True
-    enable_formula: bool = True
-    fix_chinese_spacing: bool = True
-    
-    # List fields use field(default_factory=lambda: [...])
-    heading_style_keywords: List[str] = field(default_factory=lambda: [
-        'heading', 'title', 'toc', 'cover'
-    ])
-```
-
-### 4. Error Handling Patterns
+### 3. Error Handling Patterns
 
 ```python
 # Import errors - return tuple with error dict
@@ -93,51 +105,22 @@ try:
 except ImportError:
     return "", {"error": "python-docx not installed. Run: pip install python-docx"}
 
-# Operation errors - clear user-friendly messages
-try:
-    doc = Document(doc_path)
-except Exception as e:
-    return "", {"error": f"Failed to load document: {str(e)}"}
+# DOC conversion - raise RuntimeError with user-friendly message
+soffice = _find_libreoffice()
+if not soffice:
+    raise RuntimeError(
+        "未找到 LibreOffice。\n"
+        ".doc 文件需要 LibreOffice 进行转换。\n"
+        "请从 https://www.libreoffice.org/download/ 下载安装。"
+    )
 
 # CLI errors - print to stderr, exit with code
 if "error" in metadata:
-    print(f"Error: {metadata['error']}", file=sys.stderr)
+    print(f"错误: {metadata['error']}", file=sys.stderr)
     sys.exit(1)
 ```
 
-### 5. Static Utility Methods
-
-```python
-class TextPostProcessor:
-    @staticmethod
-    def fix_chinese_spacing(text: str) -> str:
-        """Fix spacing between Chinese and Latin characters."""
-        text = re.sub(r'([\u4e00-\u9fff]) ([a-zA-Z])', r'\1\2', text)
-        text = re.sub(r'([a-zA-Z]) ([\u4e00-\u9fff])', r'\1\2', text)
-        return text
-
-    @staticmethod
-    def clean_nbsp(text: str) -> str:
-        """Remove non-breaking spaces between CJK characters."""
-        return re.sub(r'([\u4e00-\u9fff])\u00a0([\u4e00-\u9fff])', r'\1\2', text)
-```
-
-### 6. XML Element Access (python-docx)
-
-⚠️ **CRITICAL**: XML attribute names differ from python-docx properties:
-
-```python
-# ✅ Correct - gridSpan access
-if tc.grid_span > 1:
-
-# ✅ Correct - vMerge check (must check XML element)
-vmerge_elem = tc.find(qn('w:vMerge'))
-if vmerge_elem is not None:
-    # vMerge="restart" means merge start
-    # vMerge exists but no value means continuation
-```
-
-### 7. Document Element Traversal
+### 4. Document Element Traversal
 
 ⚠️ **IMPORTANT**: Use `doc.element.body` children for correct element ordering:
 
@@ -153,17 +136,30 @@ for child in body:
 
 **DO NOT** iterate `doc.paragraphs` and `doc.tables` separately - this loses ordering.
 
-### 8. GUI Threading Pattern
+### 5. XML Element Access (python-docx)
+
+⚠️ **CRITICAL**: XML attribute names differ from python-docx properties:
+
+```python
+# ✅ Correct - gridSpan access
+if tc.grid_span > 1:
+
+# ✅ Correct - vMerge check (must check XML element)
+vmerge_elem = tc.find(qn('w:vMerge'))
+if vmerge_elem is not None:
+    # vMerge="restart" means merge start
+    # vMerge exists but no value means continuation
+```
+
+### 6. GUI Threading Pattern
 
 ```python
 class ConversionThread(threading.Thread):
-    def __init__(self, input_path: str, output_path: str, config: dict, callback):
-        super().__init__()
-        self.callback = callback  # Store callback reference
-    
     def run(self):
         try:
-            content, metadata = converter.convert(self.input_path, self.output_path)
+            from enhanced_convert import detect_and_convert, ProcessingConfig
+            config = ProcessingConfig(...)
+            content, metadata = detect_and_convert(self.input_path, self.output_path, config)
             self.callback('finished', {'metadata': metadata, 'content': content})
         except Exception as e:
             self.callback('error', str(e))
@@ -173,8 +169,8 @@ class ConversionThread(threading.Thread):
 
 ## Version
 
-**Last Updated**: 2024-03-21
-**Version**: 1.0.0
+**Last Updated**: 2026-08-21
+**Version**: 1.2.0
 
 ## Author
 
